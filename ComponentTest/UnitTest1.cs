@@ -1,6 +1,8 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Smart_CSVReader;
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 
 namespace ComponentTest
@@ -21,7 +23,7 @@ namespace ComponentTest
         [TestMethod]
         public async Task ParseCSVwithHeader_Correct()
         {
-            var test = await CSVReader.ParseCSVwithHeaderAsync<TestModel>("C:\\Users\\emre.rauhofer\\Documents\\Local_Projects\\Smart_CSVReader\\ComponentTest\\test.csv", ';');
+            var test = await CSVReader.ParseCSVwithHeaderAsync<TestModel>("./test.csv", ';');
             Assert.IsTrue(test.Item1);
             
             for (int i = 1; i < this.results.Count; i++)
@@ -34,9 +36,39 @@ namespace ComponentTest
         }
 
         [TestMethod]
+        public async Task ParseCSVwithHeader_NameAttribute_Correct()
+        {
+            var test = await CSVReader.ParseCSVwithHeaderAsync<TestModelSubClassHeaderAttribute>("./test.csv", ';');
+            Assert.IsTrue(test.Item1);
+
+            for (int i = 1; i < this.results.Count; i++)
+            {
+                Assert.AreEqual(this.results[i][0], test.Item2[i - 1].AuthorProp);
+                Assert.AreEqual(this.results[i][1], test.Item2[i - 1].Title);
+                Assert.AreEqual(this.results[i][2], test.Item2[i - 1].DescriptionProp);
+                Assert.AreEqual(DateTime.Parse(this.results[i][3]), test.Item2[i - 1].Year);
+            }
+        }
+
+        [TestMethod]
+        public async Task ParseCSVwithHeader_IndexAttribute_Correct()
+        {
+            var test = await CSVReader.ParseCSVwithHeaderAsync<TestModelSubClassIndexAttribute>("./test.csv", ';');
+            Assert.IsTrue(test.Item1);
+
+            for (int i = 1; i < this.results.Count; i++)
+            {
+                Assert.AreEqual(this.results[i][0], test.Item2[i - 1].AuthorProp);
+                Assert.AreEqual(this.results[i][1], test.Item2[i - 1].Title);
+                Assert.AreEqual(this.results[i][2], test.Item2[i - 1].DescriptionProp);
+                Assert.AreEqual(DateTime.Parse(this.results[i][3]), test.Item2[i - 1].Year);
+            }
+        }
+
+        [TestMethod]
         public async Task ParseCSV_WrongClass()
         {
-            var test = await CSVReader.ParseCSVwithHeaderAsync<TestmodelConstructor>("C:\\Users\\emre.rauhofer\\Documents\\Local_Projects\\Smart_CSVReader\\ComponentTest\\test.csv", ';');
+            var test = await CSVReader.ParseCSVwithHeaderAsync<TestmodelConstructor>("./test.csv", ';');
             Assert.IsFalse(test.Item1);
             Assert.AreEqual(0, test.Item2.Count);
         }
@@ -44,7 +76,8 @@ namespace ComponentTest
         [TestMethod]
         public async Task ParseCSV_Correct()
         {
-            var test = await CSVReader.ParseCSVAsync<TestModel>("C:\\Users\\emre.rauhofer\\Documents\\Local_Projects\\Smart_CSVReader\\ComponentTest\\test2_noheader.csv",
+            var t = Directory.GetCurrentDirectory();
+            var test = await CSVReader.ParseCSVAsync<TestModel>("./test2_noheader.csv",
                 ';', new string[] { "Author", "Title", "Description", "Year" });
             Assert.IsTrue(test.Item1);
 
@@ -55,15 +88,6 @@ namespace ComponentTest
                 Assert.AreEqual(this.results[i][2], test.Item2[i - 1].Description);
                 Assert.AreEqual(this.results[i][3], test.Item2[i - 1].Year);
             }
-        }
-
-        [TestMethod]
-        public async Task ParseCSV_ClassWithSubClass()
-        {
-            var test = await CSVReader.ParseCSVAsync<TestModelSubClass>("C:\\Users\\emre.rauhofer\\Documents\\Local_Projects\\Smart_CSVReader\\ComponentTest\\test2_noheader.csv",
-                ';', new string[] { "Author", "Title", "Description", "Year" });
-            Assert.IsFalse(test.Item1);
-            Assert.AreEqual(0, test.Item2.Count);
         }
 
         [TestMethod]

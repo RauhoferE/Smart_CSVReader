@@ -1,8 +1,10 @@
 ﻿namespace Smart_CSVReader
 {
+    using Smart_CSVReader.Attributes;
     using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.Reflection;
     using System.Threading.Tasks;
 
     /// <summary>
@@ -19,7 +21,7 @@
         /// <returns> It returns a tripple with (isPrased, parsed objects, error message). </returns>
         public static async Task<(bool, List<T>, string)> ParseCSVwithHeaderAsync<T>(string csv, char delimiter) where T:class
         {
-            var res = await ReadCSVAsync(csv, delimiter);
+            (bool, List<string[]>) res = await ReadCSVAsync(csv, delimiter);
 
             if (!res.Item1)
             {
@@ -38,7 +40,7 @@
         /// <returns> It returns a tripple with (isPrased, parsed objects, error message). </returns>
         public static async Task<(bool, List<T>, string)> ParseCSVAsync<T>(string csv, char delimiter, string[] header) where T : class
         {
-            var res = await ReadCSVAsync(csv, delimiter);
+            (bool, List<string[]>) res = await ReadCSVAsync(csv, delimiter);
 
             if (!res.Item1)
             {
@@ -54,7 +56,7 @@
         /// <param name="csv"> The path to the csv file. </param>
         /// <param name="delimiter"> The delimiter character. </param>
         /// <returns> It returns a tuple that can contain true and the list of lines or false and an empty list. </returns>
-        private static Task<(bool, List<string[]>)> ReadCSVAsync(string csv, char delimiter)
+        private static async Task<(bool, List<string[]>)> ReadCSVAsync(string csv, char delimiter)
         {
             List<string[]> lines = new List<string[]>();
 
@@ -83,10 +85,38 @@
             }
             catch (Exception e)
             {
-                return Task.FromResult((false, lines));
+                return (false, lines);
             }
 
-            return Task.FromResult((true, lines));
+            return (true, lines);
+        }
+
+        private static Task<Dictionary<int, string>> MapPropertiesToHeaderPosition(PropertyInfo[] properties, string[] headers)
+        {
+            Dictionary<int, string> indexToPropertyDict = new Dictionary<int, string>();
+            for (int i = 0; i < headers.Length; i++)
+            {
+                foreach (var property in properties)
+                {
+                    CSVHeaderNameAttribute nameAttribute = (CSVHeaderNameAttribute)property.GetCustomAttribute(typeof(CSVHeaderNameAttribute));
+                    CSVHeaderIndexAttribute indexAttribute = (CSVHeaderIndexAttribute)property.GetCustomAttribute(typeof(CSVHeaderIndexAttribute));
+
+                    if (nameAttribute != null && nameAttribute.GetHeaderName() == headers[i])
+                    {
+                        indexToPropertyDict.Add(i, property.Name);
+                    }
+                    else if (indexAttribute != null && i == indexAttribute.GetIndex())
+                    {
+                        indexToPropertyDict.Add(i, property.Name);
+                    }
+                    else if (property.Name == headers[i])
+                    {
+                        indexToPropertyDict.Add(i, property.Name);
+                    }
+                }
+            }
+
+            return Task.FromResult(indexToPropertyDict);
         }
 
         /// <summary>
@@ -95,77 +125,26 @@
         /// <typeparam name="T"> The class to be parsed. </typeparam>
         /// <param name="lines"> The lines of the CSV file. </param>
         /// <returns> It returns a tuple that can contain true and the list of lines or false and an empty list. </returns>
-        private static Task<(bool, List<T>, string)> ParseLinesWithHeaderAsync<T>(List<string[]> lines) where T : class
+        private static async Task<(bool, List<T>, string)> ParseLinesWithHeaderAsync<T>(List<string[]> lines) where T : class
         {
-            var properties = typeof(T).GetProperties();
-            Dictionary<int, string> indexToPropertyDict = new Dictionary<int, string>();
-            for (int i = 0; i < lines[0].Length; i++)
-            {
-                foreach (var property in properties)
-                {
-                    if (property.Name == lines[0][i])
-                    {
-                        indexToPropertyDict.Add(i, property.Name);
-                    }
-                }
-            }
+            PropertyInfo[] properties = typeof(T).GetProperties();
+            Dictionary<int, string> indexToPropertyDict = await MapPropertiesToHeaderPosition(properties, lines[0]);
 
-            List<T> resultObjects = new List<T>();
-            for (int i = 1; i < lines.Count; i++)
-            {
-                try
-                {
-                    T newCreated = (T)Activator.CreateInstance(typeof(T));
-
-                    for (int j = 0; j < indexToPropertyDict.Count; j++)
-                    {
-                        var hasParser = newCreated.GetType().GetProperty(indexToPropertyDict.GetValueOrDefault(j)).PropertyType.GetMethod("Parse", new Type[] { typeof(string) });
-                        if (hasParser != null)
-                        {
-                            newCreated.GetType().GetProperty(indexToPropertyDict.GetValueOrDefault(j)).SetValue(newCreated, 
-                                newCreated.GetType().GetProperty(indexToPropertyDict.GetValueOrDefault(j)).PropertyType.GetMethod("Parse", new Type[] { typeof(string) }).Invoke(
-                                    newCreated.GetType().GetProperty(indexToPropertyDict.GetValueOrDefault(j)), new object[] { lines[i][j] }));
-                        }
-                        else
-                        {
-                            newCreated.GetType().GetProperty(indexToPropertyDict.GetValueOrDefault(j)).SetValue(newCreated, lines[i][j]);
-                        }
-                    }
-
-                    resultObjects.Add(newCreated);
-                }
-                catch (Exception e)
-                {
-                    return Task.FromResult((false, new List<T>(), e.Message));
-                }
-
-            }
-
-            return Task.FromResult((true, resultObjects, string.Empty));
+            lines.RemoveAt(0);
+            return await CreateObjectListFromCSV<T>(lines, indexToPropertyDict);
         }
 
         /// <summary>
-        /// This method parses the array of lines without a header into the given type.
+        /// This method creates a list of objects from every line in the csv file.
         /// </summary>
-        /// <typeparam name="T"> The class to be parsed. </typeparam>
-        /// <param name="lines"> The lines of the CSV file. </param>
-        /// <returns> It returns a tuple that can contain true and the list of lines or false and an empty list. </returns>
-        private static Task<(bool, List<T>, string)> ParseLinesAsync<T>(List<string[]> lines, string[] header) where T : class
+        /// <typeparam name="T"> The class that the lines are converted to. </typeparam>
+        /// <param name="lines"> The lines of the csv file. </param>
+        /// <param name="indexToPropertyDict"> The dictionary that maps a headernumber to a class property. </param>
+        /// <returns> It returns a triple that can contain the list with the requested objects or an empty list and an error message. </returns>
+        private static async Task<(bool, List<T>, string)> CreateObjectListFromCSV<T>(List<string[]> lines, Dictionary<int, string> indexToPropertyDict) where T : class
         {
-            var properties = typeof(T).GetProperties();
-            Dictionary<int, string> indexToPropertyDict = new Dictionary<int, string>();
-            for (int i = 0; i < header.Length; i++)
-            {
-                foreach (var property in properties)
-                {
-                    if (property.Name == header[i])
-                    {
-                        indexToPropertyDict.Add(i, property.Name);
-                    }
-                }
-            }
-
             List<T> resultObjects = new List<T>();
+
             for (int i = 0; i < lines.Count; i++)
             {
                 try
@@ -174,19 +153,44 @@
 
                     for (int j = 0; j < indexToPropertyDict.Count; j++)
                     {
-                        newCreated.GetType().GetProperty(indexToPropertyDict.GetValueOrDefault(j)).SetValue(newCreated, lines[i][j]);
+                        MethodInfo parser = newCreated.GetType().GetProperty(indexToPropertyDict.GetValueOrDefault(j)).PropertyType
+                            .GetMethod("Parse", new Type[] { typeof(string) });
+                        PropertyInfo property = newCreated.GetType().GetProperty(indexToPropertyDict.GetValueOrDefault(j));
+                        if (parser != null)
+                        {
+                            property.SetValue(newCreated, parser.Invoke(property, new object[] { lines[i][j] }));
+                        }
+                        else
+                        {
+                            property.SetValue(newCreated, lines[i][j]);
+                        }
                     }
 
                     resultObjects.Add(newCreated);
                 }
                 catch (Exception e)
                 {
-                    return Task.FromResult((false, new List<T>(), e.Message));
+                    return (false, new List<T>(), e.Message);
                 }
-
             }
 
-            return Task.FromResult((true, resultObjects, string.Empty));
+            return (true, resultObjects, string.Empty);
+        }
+
+        /// <summary>
+        /// This method parses the array of lines without a header into the given type.
+        /// </summary>
+        /// <typeparam name="T"> The class to be parsed. </typeparam>
+        /// <param name="lines"> The lines of the CSV file. </param>
+        /// <param name="header"> The headers of the CSV file in the correct order. </param>
+        /// <returns> It returns a tuple that can contain true and the list of lines or false and an empty list. </returns>
+        private static async Task<(bool, List<T>, string)> ParseLinesAsync<T>(List<string[]> lines, string[] header) where T : class
+        {
+            var properties = typeof(T).GetProperties();
+            Dictionary<int, string> indexToPropertyDict = await MapPropertiesToHeaderPosition(properties, header);
+
+            List<T> resultObjects = new List<T>();
+            return await CreateObjectListFromCSV<T>(lines, indexToPropertyDict);
         }
     }
 }
